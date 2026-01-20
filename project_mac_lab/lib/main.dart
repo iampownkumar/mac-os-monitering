@@ -1,6 +1,4 @@
 import 'dart:async';
-import 'package:flutter/material.dart';
-import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
@@ -17,6 +15,7 @@ class MacLabApp extends StatelessWidget {
     return MaterialApp(
       title: 'Mac Lab Control',
       theme: ThemeData.dark(),
+      debugShowCheckedModeBanner: false,
       home: const DashboardPage(),
     );
   }
@@ -57,13 +56,11 @@ class _DashboardPageState extends State<DashboardPage> {
   Future<void> fetchStatus() async {
     try {
       final response = await http.get(
-        Uri.parse('http://localhost:8000/status'),
+        Uri.parse('http://127.0.0.1:8000/status'),
       );
-
       final decoded = jsonDecode(response.body);
       String raw = decoded['raw'];
 
-      // Strip ANSI color codes from Fish output
       raw = raw.replaceAll(RegExp(r'\x1B\[[0-9;]*m'), '');
 
       final Map<String, bool> newStatus = {};
@@ -79,70 +76,151 @@ class _DashboardPageState extends State<DashboardPage> {
         }
       }
 
-      setState(() {
-        status = newStatus;
-      });
+      setState(() => status = newStatus);
     } catch (e) {
-      debugPrint('Error fetching status: $e');
+      debugPrint('Status error: $e');
     }
+  }
+
+  Future<void> confirmAndRun(
+    String title,
+    String msg,
+    Future<void> Function() action,
+  ) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: Text(title),
+        content: Text(msg),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text("Cancel"),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text("OK"),
+          ),
+        ],
+      ),
+    );
+
+    if (ok == true) await action();
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Mac Lab Dashboard'),
-        actions: [
-          IconButton(icon: const Icon(Icons.refresh), onPressed: fetchStatus),
-        ],
-      ),
-      body: GridView.builder(
-        padding: const EdgeInsets.all(10),
-        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-          crossAxisCount: 8,
-          crossAxisSpacing: 6,
-          mainAxisSpacing: 6,
-          childAspectRatio: 1.2,
-        ),
-        itemCount: machines.length,
-        itemBuilder: (context, index) {
-          String name = machines[index];
-          bool online = status[name] ?? false;
+      appBar: AppBar(title: const Text('Mac Lab Dashboard')),
 
-          return GestureDetector(
-            onTap: () {
-              showDialog(
-                context: context,
-                builder: (_) => AlertDialog(
-                  title: Text(name),
-                  content: Text(online ? "Status: ONLINE" : "Status: OFFLINE"),
-                  actions: [
-                    TextButton(
-                      onPressed: () => Navigator.pop(context),
-                      child: const Text("Close"),
-                    ),
-                  ],
-                ),
-              );
-            },
-            child: Container(
-              decoration: BoxDecoration(
-                color: online ? Colors.green[700] : Colors.red[700],
-                borderRadius: BorderRadius.circular(6),
+      body: Column(
+        children: [
+          Expanded(
+            child: GridView.builder(
+              padding: const EdgeInsets.all(10),
+              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: 8,
+                crossAxisSpacing: 6,
+                mainAxisSpacing: 6,
+                childAspectRatio: 1.2,
               ),
-              child: Center(
-                child: Text(
-                  name,
-                  style: const TextStyle(
-                    fontSize: 12,
-                    color: Colors.white,
-                    fontWeight: FontWeight.bold,
+              itemCount: machines.length,
+              itemBuilder: (context, index) {
+                final name = machines[index];
+                final online = status[name] ?? false;
+
+                return GestureDetector(
+                  onTap: () {
+                    showDialog(
+                      context: context,
+                      builder: (_) => AlertDialog(
+                        title: Text(name),
+                        content: Text(online ? "ONLINE" : "OFFLINE"),
+                        actions: [
+                          TextButton(
+                            child: const Text("Reboot"),
+                            onPressed: () async {
+                              await http.post(
+                                Uri.parse("http://127.0.0.1:8000/reboot/$name"),
+                              );
+                              Navigator.pop(context);
+                            },
+                          ),
+                          TextButton(
+                            child: const Text("Shutdown"),
+                            onPressed: () async {
+                              await http.post(
+                                Uri.parse(
+                                  "http://127.0.0.1:8000/shutdown/$name",
+                                ),
+                              );
+                              Navigator.pop(context);
+                            },
+                          ),
+                          TextButton(
+                            child: const Text("Close"),
+                            onPressed: () => Navigator.pop(context),
+                          ),
+                        ],
+                      ),
+                    );
+                  },
+                  child: Container(
+                    decoration: BoxDecoration(
+                      color: online ? Colors.green[700] : Colors.red[700],
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: Center(
+                      child: Text(
+                        name,
+                        style: const TextStyle(
+                          fontSize: 12,
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+
+          Padding(
+            padding: const EdgeInsets.all(12),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              children: [
+                ElevatedButton.icon(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.orange,
+                  ),
+                  icon: const Icon(Icons.restart_alt),
+                  label: const Text("Reboot ALL"),
+                  onPressed: () => confirmAndRun(
+                    "Reboot Lab",
+                    "Reboot ALL machines?",
+                    () => http.post(
+                      Uri.parse("http://127.0.0.1:8000/reboot-all"),
+                    ),
                   ),
                 ),
-              ),
+                ElevatedButton.icon(
+                  style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+                  icon: const Icon(Icons.power_settings_new),
+                  label: const Text("Shutdown ALL"),
+                  onPressed: () => confirmAndRun(
+                    "Shutdown Lab",
+                    "Shutdown ALL machines?",
+                    () => http.post(
+                      Uri.parse("http://127.0.0.1:8000/shutdown-all"),
+                    ),
+                  ),
+                ),
+              ],
             ),
-          );
-        },
+          ),
+        ],
       ),
     );
   }
