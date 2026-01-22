@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
@@ -35,30 +34,20 @@ class _DashboardPageState extends State<DashboardPage> {
   );
 
   Map<String, bool> status = {};
-  Timer? refreshTimer;
+  bool loading = false;
 
   @override
   void initState() {
     super.initState();
-    fetchStatus();
-    refreshTimer = Timer.periodic(
-      const Duration(seconds: 10),
-      (_) => fetchStatus(),
-    );
-  }
-
-  @override
-  void dispose() {
-    refreshTimer?.cancel();
-    super.dispose();
+    fetchStatus(); // one time only
   }
 
   Future<void> fetchStatus() async {
+    setState(() => loading = true);
+
     try {
-      final response = await http.get(
-        Uri.parse('http://127.0.0.1:8000/status'),
-      );
-      final decoded = jsonDecode(response.body);
+      final res = await http.get(Uri.parse("http://127.0.0.1:8000/status"));
+      final decoded = jsonDecode(res.body);
       String raw = decoded['raw'];
 
       raw = raw.replaceAll(RegExp(r'\x1B\[[0-9;]*m'), '');
@@ -70,19 +59,21 @@ class _DashboardPageState extends State<DashboardPage> {
           final parts = line.split(':');
           if (parts.length >= 2) {
             final name = parts[0].trim();
-            final isOnline = parts[1].contains('ONLINE');
-            newStatus[name] = isOnline;
+            final online = parts[1].contains('ONLINE');
+            newStatus[name] = online;
           }
         }
       }
 
       setState(() => status = newStatus);
     } catch (e) {
-      debugPrint('Status error: $e');
+      debugPrint("Status error: $e");
     }
+
+    setState(() => loading = false);
   }
 
-  Future<void> confirmAndRun(
+  Future<void> confirm(
     String title,
     String msg,
     Future<void> Function() action,
@@ -111,22 +102,28 @@ class _DashboardPageState extends State<DashboardPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Mac Lab Dashboard')),
-
+      appBar: AppBar(
+        title: const Text("Mac Lab Dashboard"),
+        actions: [
+          IconButton(icon: const Icon(Icons.refresh), onPressed: fetchStatus),
+        ],
+      ),
       body: Column(
         children: [
+          if (loading) const LinearProgressIndicator(),
+
           Expanded(
             child: GridView.builder(
               padding: const EdgeInsets.all(10),
               gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                crossAxisCount: 8,
-                crossAxisSpacing: 6,
-                mainAxisSpacing: 6,
+                crossAxisCount: 9,
+                crossAxisSpacing: 8,
+                mainAxisSpacing: 8,
                 childAspectRatio: 1.2,
               ),
               itemCount: machines.length,
-              itemBuilder: (context, index) {
-                final name = machines[index];
+              itemBuilder: (context, i) {
+                final name = machines[i];
                 final online = status[name] ?? false;
 
                 return GestureDetector(
@@ -168,16 +165,12 @@ class _DashboardPageState extends State<DashboardPage> {
                   child: Container(
                     decoration: BoxDecoration(
                       color: online ? Colors.green[700] : Colors.red[700],
-                      borderRadius: BorderRadius.circular(6),
+                      borderRadius: BorderRadius.circular(8),
                     ),
                     child: Center(
                       child: Text(
                         name,
-                        style: const TextStyle(
-                          fontSize: 12,
-                          color: Colors.white,
-                          fontWeight: FontWeight.bold,
-                        ),
+                        style: const TextStyle(fontWeight: FontWeight.bold),
                       ),
                     ),
                   ),
@@ -197,9 +190,9 @@ class _DashboardPageState extends State<DashboardPage> {
                   ),
                   icon: const Icon(Icons.restart_alt),
                   label: const Text("Reboot ALL"),
-                  onPressed: () => confirmAndRun(
+                  onPressed: () => confirm(
                     "Reboot Lab",
-                    "Reboot ALL machines?",
+                    "Reboot ALL Macs?",
                     () => http.post(
                       Uri.parse("http://127.0.0.1:8000/reboot-all"),
                     ),
@@ -209,9 +202,9 @@ class _DashboardPageState extends State<DashboardPage> {
                   style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
                   icon: const Icon(Icons.power_settings_new),
                   label: const Text("Shutdown ALL"),
-                  onPressed: () => confirmAndRun(
+                  onPressed: () => confirm(
                     "Shutdown Lab",
-                    "Shutdown ALL machines?",
+                    "Shutdown ALL Macs?",
                     () => http.post(
                       Uri.parse("http://127.0.0.1:8000/shutdown-all"),
                     ),

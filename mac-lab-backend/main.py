@@ -98,6 +98,15 @@ def reboot_all():
     )
     return {"ok": result.returncode == 0}
 
+@app.post("/backend/start")
+def start_backend():
+    subprocess.run(["launchctl", "load", os.path.expanduser("~/Library/LaunchAgents/com.pown.maclab.backend.plist")])
+    return {"ok": True}
+
+@app.post("/backend/stop")
+def stop_backend():
+    subprocess.run(["launchctl", "unload", os.path.expanduser("~/Library/LaunchAgents/com.pown.maclab.backend.plist")])
+    return {"ok": True}
 
 
 # INFO:     Stopping reloader process [15742]
