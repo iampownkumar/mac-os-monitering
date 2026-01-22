@@ -48,6 +48,7 @@ class _DashboardPageState extends State<DashboardPage> {
     try {
       final res = await http.get(Uri.parse("http://127.0.0.1:8000/status"));
       final decoded = jsonDecode(res.body);
+      setState(() => status = Map<String, bool>.from(decoded['machines']));
       String raw = decoded['raw'];
 
       raw = raw.replaceAll(RegExp(r'\x1B\[[0-9;]*m'), '');

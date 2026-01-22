@@ -1,22 +1,38 @@
 from fastapi import FastAPI, HTTPException
 import subprocess
+import os 
+import time
 
 app = FastAPI()
 
 FISH = "/opt/homebrew/bin/fish"
 
+import re
+import time
+
 @app.get("/status")
 def get_status():
-    try:
-        result = subprocess.run(
-            [FISH, "-l", "-c", "mac-all status"],
-            capture_output=True,
-            text=True,
-            timeout=15
-        )
-        return {"raw": result.stdout}
-    except Exception as e:
-        return {"error": str(e)}
+    result = subprocess.run(
+        [FISH, "-l", "-c", "mac-all status"],
+        capture_output=True,
+        text=True,
+        timeout=15
+    )
+
+    status = {}
+    for line in result.stdout.splitlines():
+        # remove ANSI color codes
+        clean = re.sub(r'\x1B\[[0-9;]*m', '', line).strip()
+
+        if clean.startswith("mac-"):
+            name, rest = clean.split(":", 1)
+            status[name.strip()] = "ONLINE" in rest
+
+    return {
+        "machines": status,
+        "ts": time.time()
+    }
+
 
 @app.post("/reboot/{host}")
 def reboot_host(host: str):
