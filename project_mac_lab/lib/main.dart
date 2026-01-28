@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import 'dart:async';
 
 void main() {
   runApp(const MacLabApp());
@@ -35,40 +36,40 @@ class _DashboardPageState extends State<DashboardPage> {
 
   Map<String, bool> status = {};
   bool loading = false;
+  Timer? refreshTimer;
 
   @override
   void initState() {
     super.initState();
-    fetchStatus(); // one time only
+    fetchStatus(); // first load
+
+    refreshTimer = Timer.periodic(
+      const Duration(seconds: 5),
+      (_) => fetchStatus(),
+    );
+  }
+
+  @override
+  void dispose() {
+    refreshTimer?.cancel();
+    super.dispose();
   }
 
   Future<void> fetchStatus() async {
     setState(() => loading = true);
 
     try {
-      final res = await http.get(Uri.parse("http://127.0.0.1:8000/status"));
-      final decoded = jsonDecode(res.body);
-      setState(() => status = Map<String, bool>.from(decoded['machines']));
-      String raw = decoded['raw'];
-
-      raw = raw.replaceAll(RegExp(r'\x1B\[[0-9;]*m'), '');
+      final res = await http.get(Uri.parse("http://admin-pc.local:8000/state"));
+      final decoded = jsonDecode(res.body) as Map<String, dynamic>;
 
       final Map<String, bool> newStatus = {};
-
-      for (var line in raw.split('\n')) {
-        if (line.contains('mac-')) {
-          final parts = line.split(':');
-          if (parts.length >= 2) {
-            final name = parts[0].trim();
-            final online = parts[1].contains('ONLINE');
-            newStatus[name] = online;
-          }
-        }
-      }
+      decoded.forEach((k, v) {
+        newStatus[k] = v == true;
+      });
 
       setState(() => status = newStatus);
     } catch (e) {
-      debugPrint("Status error: $e");
+      debugPrint("State error: $e");
     }
 
     setState(() => loading = false);

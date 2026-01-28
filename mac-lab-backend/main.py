@@ -125,6 +125,24 @@ def stop_backend():
     return {"ok": True}
 
 
+STATE = {}
+
+@app.post("/online/{host}")
+def online(host: str):
+    STATE[host] = True
+    return {"ok": True}
+
+@app.post("/offline/{host}")
+def offline(host: str):
+    STATE[host] = False
+    return {"ok": True}
+
+@app.get("/state")
+def get_state():
+    return STATE
+
+
+
 # INFO:     Stopping reloader process [15742]
 # (venv) pownkumar@admin-pc ~/c/f/m/mac-lab-backend (main)> cd /Users/pownkumar/code/flutter/main/mac-lab-backend
 #                                                           python3 -m venv venv
