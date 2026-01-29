@@ -1,7 +1,8 @@
 from fastapi import FastAPI, HTTPException
 import subprocess, re, time, os
 from pydantic import BaseModel
-
+from fastapi.responses import StreamingResponse
+import subprocess
 
 
 app = FastAPI()
@@ -83,3 +84,60 @@ def brew_install(id: int, req: BrewRequest):
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+
+RUNNING = {}
+
+@app.get("/brew/install/{mac_id}/stream")
+def brew_install_stream(mac_id: str, type: str, name: str):
+    host = f"mac-{mac_id.zfill(3)}"
+
+    cmd = [
+        "ssh",
+        "-o", "ConnectTimeout=6",
+        "-o", "ConnectionAttempts=1",
+        f"ritmaclab@{host}.local",
+        f"HOMEBREW_NO_AUTO_UPDATE=1 /opt/homebrew/bin/brew install --{type} {name}"
+    ]
+
+    def stream():
+        process = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+        )
+
+        RUNNING[host] = process
+
+        yield f"[{host}] Starting install: {name} ({type})\n"
+
+        try:
+            for line in process.stdout:
+                yield line
+        except GeneratorExit:
+            process.kill()
+            yield f"\n[{host}] ⛔ Manually stopped\n"
+            return
+
+        rc = process.wait()
+        RUNNING.pop(host, None)
+
+        if rc == 0:
+            yield f"\n[{host}] ✅ Completed\n"
+        else:
+            yield f"\n[{host}] ❌ Failed or timeout\n"
+
+    return StreamingResponse(stream(), media_type="text/plain")
+
+@app.post("/brew/stop/{mac_id}")
+def stop_brew(mac_id: str):
+    host = f"mac-{mac_id.zfill(3)}"
+    proc = RUNNING.get(host)
+
+    if proc and proc.poll() is None:
+        proc.kill()
+        return {"ok": True, "msg": f"{host} stopped"}
+    return {"ok": False, "msg": "No running job"}
