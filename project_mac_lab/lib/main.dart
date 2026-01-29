@@ -1,7 +1,6 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
-import 'dart:async';
 
 void main() {
   runApp(const MacLabApp());
@@ -36,40 +35,29 @@ class _DashboardPageState extends State<DashboardPage> {
 
   Map<String, bool> status = {};
   bool loading = false;
-  Timer? refreshTimer;
 
   @override
   void initState() {
     super.initState();
     fetchStatus(); // first load
-
-    refreshTimer = Timer.periodic(
-      const Duration(seconds: 5),
-      (_) => fetchStatus(),
-    );
-  }
-
-  @override
-  void dispose() {
-    refreshTimer?.cancel();
-    super.dispose();
   }
 
   Future<void> fetchStatus() async {
     setState(() => loading = true);
 
     try {
-      final res = await http.get(Uri.parse("http://admin-pc.local:8000/state"));
-      final decoded = jsonDecode(res.body) as Map<String, dynamic>;
+      final res = await http.get(
+        Uri.parse("http://admin-pc.local:8000/status"),
+      );
+      final decoded = jsonDecode(res.body);
+      final Map<String, dynamic> data = decoded["machines"];
 
       final Map<String, bool> newStatus = {};
-      decoded.forEach((k, v) {
-        newStatus[k] = v == true;
-      });
+      data.forEach((k, v) => newStatus[k] = v == true);
 
       setState(() => status = newStatus);
     } catch (e) {
-      debugPrint("State error: $e");
+      debugPrint("Status fetch error: $e");
     }
 
     setState(() => loading = false);
@@ -107,7 +95,11 @@ class _DashboardPageState extends State<DashboardPage> {
       appBar: AppBar(
         title: const Text("Mac Lab Dashboard"),
         actions: [
-          IconButton(icon: const Icon(Icons.refresh), onPressed: fetchStatus),
+          IconButton(
+            icon: const Icon(Icons.flash_on),
+            tooltip: "Refresh (Parallel SSH)",
+            onPressed: fetchStatus,
+          ),
         ],
       ),
       body: Column(
@@ -140,7 +132,9 @@ class _DashboardPageState extends State<DashboardPage> {
                             child: const Text("Reboot"),
                             onPressed: () async {
                               await http.post(
-                                Uri.parse("http://127.0.0.1:8000/reboot/$name"),
+                                Uri.parse(
+                                  "http://admin-pc.local:8000/reboot/$name",
+                                ),
                               );
                               Navigator.pop(context);
                             },
@@ -150,7 +144,7 @@ class _DashboardPageState extends State<DashboardPage> {
                             onPressed: () async {
                               await http.post(
                                 Uri.parse(
-                                  "http://127.0.0.1:8000/shutdown/$name",
+                                  "http://admin-pc.local:8000/shutdown/$name",
                                 ),
                               );
                               Navigator.pop(context);
@@ -196,7 +190,7 @@ class _DashboardPageState extends State<DashboardPage> {
                     "Reboot Lab",
                     "Reboot ALL Macs?",
                     () => http.post(
-                      Uri.parse("http://127.0.0.1:8000/reboot-all"),
+                      Uri.parse("http://admin-pc.local:8000/reboot-all"),
                     ),
                   ),
                 ),
@@ -208,7 +202,7 @@ class _DashboardPageState extends State<DashboardPage> {
                     "Shutdown Lab",
                     "Shutdown ALL Macs?",
                     () => http.post(
-                      Uri.parse("http://127.0.0.1:8000/shutdown-all"),
+                      Uri.parse("http://admin-pc.local:8000/shutdown-all"),
                     ),
                   ),
                 ),
