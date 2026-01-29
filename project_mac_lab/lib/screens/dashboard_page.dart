@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
 import '../services/brew_services.dart';
+import 'package:http/http.dart' as http;
 
 class DashboardPage extends StatefulWidget {
   const DashboardPage({super.key});
@@ -10,16 +10,13 @@ class DashboardPage extends StatefulWidget {
   State<DashboardPage> createState() => _DashboardPageState();
 }
 
-class _DashboardPageState extends State<DashboardPage>
-    with AutomaticKeepAliveClientMixin {
-  @override
-  bool get wantKeepAlive => true;
-
+class _DashboardPageState extends State<DashboardPage> {
   final List<String> machines = List.generate(
     33,
     (i) => 'mac-${(i + 1).toString().padLeft(3, '0')}',
   );
 
+  final Set<String> selected = {};
   Map<String, bool> status = {};
   bool loading = false;
 
@@ -33,13 +30,11 @@ class _DashboardPageState extends State<DashboardPage>
   }
 
   void startRefresh() {
-    timer?.cancel();
     countdown = 20;
+    timer?.cancel();
 
     timer = Timer.periodic(const Duration(seconds: 1), (t) {
-      if (!mounted) return;
       setState(() => countdown--);
-
       if (countdown == 0) {
         t.cancel();
         fetchStatus();
@@ -50,16 +45,14 @@ class _DashboardPageState extends State<DashboardPage>
   }
 
   Future<void> fetchStatus() async {
-    if (!mounted) return;
     setState(() => loading = true);
     try {
       status = await BrewService.fetchStatus();
     } catch (_) {}
-    if (!mounted) return;
     setState(() => loading = false);
   }
 
-  Future<void> confirm(
+  Future<void> confirmAndRun(
     String title,
     String msg,
     Future<void> Function() action,
@@ -81,8 +74,37 @@ class _DashboardPageState extends State<DashboardPage>
         ],
       ),
     );
-
     if (ok == true) await action();
+  }
+
+  Future<void> rebootSelected() async {
+    await confirmAndRun(
+      "Reboot Selected",
+      "Reboot ${selected.length} machines?\n\n${selected.join(", ")}",
+      () async {
+        for (final mac in selected) {
+          await http.post(Uri.parse("http://admin-pc.local:8000/reboot/$mac"));
+        }
+        selected.clear();
+        fetchStatus();
+      },
+    );
+  }
+
+  Future<void> shutdownSelected() async {
+    await confirmAndRun(
+      "Shutdown Selected",
+      "Shutdown ${selected.length} machines?\n\n${selected.join(", ")}",
+      () async {
+        for (final mac in selected) {
+          await http.post(
+            Uri.parse("http://admin-pc.local:8000/shutdown/$mac"),
+          );
+        }
+        selected.clear();
+        fetchStatus();
+      },
+    );
   }
 
   @override
@@ -93,16 +115,34 @@ class _DashboardPageState extends State<DashboardPage>
 
   @override
   Widget build(BuildContext context) {
-    super.build(context);
-
     return Scaffold(
       appBar: AppBar(
         title: const Text("Mac Lab Dashboard"),
         actions: [
-          Center(child: Text("Refresh in $countdown s   ")),
-          IconButton(icon: const Icon(Icons.refresh), onPressed: startRefresh),
+          Row(
+            children: [
+              const Text("Select All"),
+              Checkbox(
+                value: selected.length == machines.length,
+                onChanged: (v) {
+                  setState(() {
+                    if (v == true) {
+                      selected.addAll(machines);
+                    } else {
+                      selected.clear();
+                    }
+                  });
+                },
+              ),
+              IconButton(
+                icon: const Icon(Icons.refresh),
+                onPressed: startRefresh,
+              ),
+            ],
+          ),
         ],
       ),
+
       body: Column(
         children: [
           if (loading) const LinearProgressIndicator(),
@@ -114,30 +154,44 @@ class _DashboardPageState extends State<DashboardPage>
                 crossAxisCount: 6,
                 crossAxisSpacing: 10,
                 mainAxisSpacing: 10,
-                childAspectRatio: 1.1,
               ),
               itemCount: machines.length,
               itemBuilder: (context, i) {
                 final name = machines[i];
                 final online = status[name] ?? false;
-
-                final extraGap = (i % 6 == 2) ? 18.0 : 6.0;
+                final isSelected = selected.contains(name);
+                final gap = (i % 6 == 2) ? 18.0 : 6.0;
 
                 return Padding(
-                  padding: EdgeInsets.only(right: extraGap),
-                  child: Container(
-                    decoration: BoxDecoration(
-                      color: online
-                          ? Colors.green.shade600
-                          : Colors.red.shade600,
-                      borderRadius: BorderRadius.circular(14),
-                    ),
-                    child: Center(
-                      child: Text(
-                        name,
-                        style: const TextStyle(
-                          fontWeight: FontWeight.bold,
-                          fontSize: 14,
+                  padding: EdgeInsets.only(right: gap),
+                  child: GestureDetector(
+                    onTap: () {
+                      setState(() {
+                        isSelected ? selected.remove(name) : selected.add(name);
+                      });
+                    },
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: online
+                            ? Colors.green.shade600
+                            : Colors.red.shade600,
+                        borderRadius: BorderRadius.circular(14),
+                        border: isSelected
+                            ? Border.all(color: Colors.blueAccent, width: 3)
+                            : null,
+                        boxShadow: isSelected
+                            ? [
+                                BoxShadow(
+                                  color: Colors.blueAccent.withOpacity(0.6),
+                                  blurRadius: 8,
+                                ),
+                              ]
+                            : [],
+                      ),
+                      child: Center(
+                        child: Text(
+                          name,
+                          style: const TextStyle(fontWeight: FontWeight.bold),
                         ),
                       ),
                     ),
@@ -147,40 +201,80 @@ class _DashboardPageState extends State<DashboardPage>
             ),
           ),
 
+          // GLOBAL ALL CONTROLS (locked when selection active)
           Padding(
-            padding: const EdgeInsets.only(bottom: 12),
+            padding: const EdgeInsets.symmetric(vertical: 6),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceEvenly,
               children: [
                 ElevatedButton.icon(
                   style: ElevatedButton.styleFrom(
                     backgroundColor: Colors.orange,
+                    disabledBackgroundColor: Colors.orange.withOpacity(0.3),
                   ),
                   icon: const Icon(Icons.restart_alt),
                   label: const Text("Reboot ALL"),
-                  onPressed: () => confirm(
-                    "Reboot Lab",
-                    "Reboot ALL Macs now?",
-                    () => http.post(
-                      Uri.parse("http://admin-pc.local:8000/reboot-all"),
-                    ),
-                  ),
+                  onPressed: selected.isNotEmpty
+                      ? null
+                      : () => confirmAndRun(
+                          "Reboot Lab",
+                          "Reboot ALL Macs?",
+                          () => http.post(
+                            Uri.parse("http://admin-pc.local:8000/reboot-all"),
+                          ),
+                        ),
                 ),
                 ElevatedButton.icon(
-                  style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.red,
+                    disabledBackgroundColor: Colors.red.withOpacity(0.3),
+                  ),
                   icon: const Icon(Icons.power_settings_new),
                   label: const Text("Shutdown ALL"),
-                  onPressed: () => confirm(
-                    "Shutdown Lab",
-                    "Shutdown ALL Macs now?",
-                    () => http.post(
-                      Uri.parse("http://admin-pc.local:8000/shutdown-all"),
-                    ),
-                  ),
+                  onPressed: selected.isNotEmpty
+                      ? null
+                      : () => confirmAndRun(
+                          "Shutdown Lab",
+                          "Shutdown ALL Macs?",
+                          () => http.post(
+                            Uri.parse(
+                              "http://admin-pc.local:8000/shutdown-all",
+                            ),
+                          ),
+                        ),
                 ),
               ],
             ),
           ),
+
+          // SELECTED CONTROLS
+          if (selected.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                children: [
+                  ElevatedButton.icon(
+                    icon: const Icon(Icons.restart_alt),
+                    label: Text("Reboot (${selected.length})"),
+                    onPressed: rebootSelected,
+                  ),
+                  ElevatedButton.icon(
+                    icon: const Icon(Icons.power_settings_new),
+                    label: Text("Shutdown (${selected.length})"),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.red,
+                    ),
+                    onPressed: shutdownSelected,
+                  ),
+                  ElevatedButton.icon(
+                    icon: const Icon(Icons.clear),
+                    label: const Text("Clear"),
+                    onPressed: () => setState(() => selected.clear()),
+                  ),
+                ],
+              ),
+            ),
         ],
       ),
     );
