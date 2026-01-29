@@ -1,5 +1,8 @@
 from fastapi import FastAPI, HTTPException
 import subprocess, re, time, os
+from pydantic import BaseModel
+
+
 
 app = FastAPI()
 FISH = "/opt/homebrew/bin/fish"
@@ -50,3 +53,33 @@ def reboot_all():
 def shutdown_all():
     subprocess.run([FISH, "-l", "-c", "mac-all down"])
     return {"ok": True}
+
+
+class BrewRequest(BaseModel):
+    type: str   # "cask" or "formula"
+    name: str   # "firefox", "iterm2", "visual-studio-code", etc.
+
+@app.post("/brew/install/{id}")
+def brew_install(id: int, req: BrewRequest):
+    num = str(id).zfill(3)
+    host = f"mac-{num}"
+
+    cmd = f"mac-brew mac {id} {req.type} {req.name}"
+
+    try:
+        result = subprocess.run(
+            ["/opt/homebrew/bin/fish", "-c", cmd],
+            capture_output=True,
+            text=True,
+            timeout=600
+        )
+
+        return {
+            "host": host,
+            "ok": result.returncode == 0,
+            "stdout": result.stdout,
+            "stderr": result.stderr
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

@@ -15,10 +15,45 @@ class MacLabApp extends StatelessWidget {
       title: 'Mac Lab Control',
       theme: ThemeData.dark(),
       debugShowCheckedModeBanner: false,
-      home: const DashboardPage(),
+      home: const HomePage(),
     );
   }
 }
+
+class HomePage extends StatefulWidget {
+  const HomePage({super.key});
+
+  @override
+  State<HomePage> createState() => _HomePageState();
+}
+
+class _HomePageState extends State<HomePage> {
+  int index = 0;
+
+  final pages = const [DashboardPage(), SoftwarePage()];
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: pages[index],
+      bottomNavigationBar: BottomNavigationBar(
+        currentIndex: index,
+        onTap: (i) => setState(() => index = i),
+        items: const [
+          BottomNavigationBarItem(icon: Icon(Icons.computer), label: "Lab"),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.download),
+            label: "Software",
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/* =========================
+   DASHBOARD (FULL GRID)
+   ========================= */
 
 class DashboardPage extends StatefulWidget {
   const DashboardPage({super.key});
@@ -39,27 +74,21 @@ class _DashboardPageState extends State<DashboardPage> {
   @override
   void initState() {
     super.initState();
-    fetchStatus(); // first load
+    fetchStatus();
   }
 
   Future<void> fetchStatus() async {
     setState(() => loading = true);
-
     try {
       final res = await http.get(
         Uri.parse("http://admin-pc.local:8000/status"),
       );
       final decoded = jsonDecode(res.body);
       final Map<String, dynamic> data = decoded["machines"];
-
-      final Map<String, bool> newStatus = {};
-      data.forEach((k, v) => newStatus[k] = v == true);
-
-      setState(() => status = newStatus);
-    } catch (e) {
-      debugPrint("Status fetch error: $e");
-    }
-
+      setState(() {
+        status = data.map((k, v) => MapEntry(k, v == true));
+      });
+    } catch (_) {}
     setState(() => loading = false);
   }
 
@@ -85,7 +114,6 @@ class _DashboardPageState extends State<DashboardPage> {
         ],
       ),
     );
-
     if (ok == true) await action();
   }
 
@@ -95,17 +123,12 @@ class _DashboardPageState extends State<DashboardPage> {
       appBar: AppBar(
         title: const Text("Mac Lab Dashboard"),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.flash_on),
-            tooltip: "Refresh (Parallel SSH)",
-            onPressed: fetchStatus,
-          ),
+          IconButton(icon: const Icon(Icons.flash_on), onPressed: fetchStatus),
         ],
       ),
       body: Column(
         children: [
           if (loading) const LinearProgressIndicator(),
-
           Expanded(
             child: GridView.builder(
               padding: const EdgeInsets.all(10),
@@ -113,103 +136,122 @@ class _DashboardPageState extends State<DashboardPage> {
                 crossAxisCount: 9,
                 crossAxisSpacing: 8,
                 mainAxisSpacing: 8,
-                childAspectRatio: 1.2,
               ),
               itemCount: machines.length,
               itemBuilder: (context, i) {
                 final name = machines[i];
                 final online = status[name] ?? false;
 
-                return GestureDetector(
-                  onTap: () {
-                    showDialog(
-                      context: context,
-                      builder: (_) => AlertDialog(
-                        title: Text(name),
-                        content: Text(online ? "ONLINE" : "OFFLINE"),
-                        actions: [
-                          TextButton(
-                            child: const Text("Reboot"),
-                            onPressed: () async {
-                              await http.post(
-                                Uri.parse(
-                                  "http://admin-pc.local:8000/reboot/$name",
-                                ),
-                              );
-                              Navigator.pop(context);
-                            },
-                          ),
-                          TextButton(
-                            child: const Text("Shutdown"),
-                            onPressed: () async {
-                              await http.post(
-                                Uri.parse(
-                                  "http://admin-pc.local:8000/shutdown/$name",
-                                ),
-                              );
-                              Navigator.pop(context);
-                            },
-                          ),
-                          TextButton(
-                            child: const Text("Close"),
-                            onPressed: () => Navigator.pop(context),
-                          ),
-                        ],
-                      ),
-                    );
-                  },
-                  child: Container(
-                    decoration: BoxDecoration(
-                      color: online ? Colors.green[700] : Colors.red[700],
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Center(
-                      child: Text(
-                        name,
-                        style: const TextStyle(fontWeight: FontWeight.bold),
-                      ),
-                    ),
+                return Container(
+                  decoration: BoxDecoration(
+                    color: online ? Colors.green[700] : Colors.red[700],
+                    borderRadius: BorderRadius.circular(8),
                   ),
+                  child: Center(child: Text(name)),
                 );
               },
             ),
           ),
-
-          Padding(
-            padding: const EdgeInsets.all(12),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-              children: [
-                ElevatedButton.icon(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.orange,
-                  ),
-                  icon: const Icon(Icons.restart_alt),
-                  label: const Text("Reboot ALL"),
-                  onPressed: () => confirm(
-                    "Reboot Lab",
-                    "Reboot ALL Macs?",
-                    () => http.post(
-                      Uri.parse("http://admin-pc.local:8000/reboot-all"),
-                    ),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+            children: [
+              ElevatedButton.icon(
+                icon: const Icon(Icons.restart_alt),
+                label: const Text("Reboot ALL"),
+                onPressed: () => confirm(
+                  "Reboot Lab",
+                  "Reboot ALL Macs?",
+                  () => http.post(
+                    Uri.parse("http://admin-pc.local:8000/reboot-all"),
                   ),
                 ),
-                ElevatedButton.icon(
-                  style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
-                  icon: const Icon(Icons.power_settings_new),
-                  label: const Text("Shutdown ALL"),
-                  onPressed: () => confirm(
-                    "Shutdown Lab",
-                    "Shutdown ALL Macs?",
-                    () => http.post(
-                      Uri.parse("http://admin-pc.local:8000/shutdown-all"),
-                    ),
+              ),
+              ElevatedButton.icon(
+                icon: const Icon(Icons.power_settings_new),
+                label: const Text("Shutdown ALL"),
+                onPressed: () => confirm(
+                  "Shutdown Lab",
+                  "Shutdown ALL Macs?",
+                  () => http.post(
+                    Uri.parse("http://admin-pc.local:8000/shutdown-all"),
                   ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+        ],
+      ),
+    );
+  }
+}
+
+/* =========================
+   SOFTWARE INSTALLER UI
+   ========================= */
+
+class SoftwarePage extends StatefulWidget {
+  const SoftwarePage({super.key});
+
+  @override
+  State<SoftwarePage> createState() => _SoftwarePageState();
+}
+
+class _SoftwarePageState extends State<SoftwarePage> {
+  final TextEditingController appController = TextEditingController();
+  String type = "cask";
+  bool loading = false;
+  String output = "";
+
+  Future<void> install() async {
+    setState(() => loading = true);
+    try {
+      final res = await http.post(
+        Uri.parse("http://admin-pc.local:8000/brew/install/23"),
+        headers: {"Content-Type": "application/json"},
+        body: jsonEncode({"type": type, "name": appController.text}),
+      );
+      setState(() => output = res.body);
+    } catch (e) {
+      setState(() => output = e.toString());
+    }
+    setState(() => loading = false);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text("Install Software (mac-023)")),
+      body: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          children: [
+            TextField(
+              controller: appController,
+              decoration: const InputDecoration(
+                hintText: "firefox, iterm2, vscode",
+              ),
+            ),
+            DropdownButton<String>(
+              value: type,
+              items: const [
+                DropdownMenuItem(value: "cask", child: Text("Cask (GUI)")),
+                DropdownMenuItem(
+                  value: "formula",
+                  child: Text("Formula (CLI)"),
                 ),
               ],
+              onChanged: (v) => setState(() => type = v!),
             ),
-          ),
-        ],
+            ElevatedButton.icon(
+              icon: const Icon(Icons.cloud_download),
+              label: const Text("Install"),
+              onPressed: loading ? null : install,
+            ),
+            if (loading) const LinearProgressIndicator(),
+            Expanded(child: SingleChildScrollView(child: Text(output))),
+          ],
+        ),
       ),
     );
   }
