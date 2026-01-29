@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
@@ -29,8 +30,7 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> {
   int index = 0;
-
-  final pages = const [DashboardPage(), SoftwarePage()];
+  final pages = const [DashboardPage(), MultiInstallPage()];
 
   @override
   Widget build(BuildContext context) {
@@ -85,36 +85,9 @@ class _DashboardPageState extends State<DashboardPage> {
       );
       final decoded = jsonDecode(res.body);
       final Map<String, dynamic> data = decoded["machines"];
-      setState(() {
-        status = data.map((k, v) => MapEntry(k, v == true));
-      });
+      setState(() => status = data.map((k, v) => MapEntry(k, v == true)));
     } catch (_) {}
     setState(() => loading = false);
-  }
-
-  Future<void> confirm(
-    String title,
-    String msg,
-    Future<void> Function() action,
-  ) async {
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (_) => AlertDialog(
-        title: Text(title),
-        content: Text(msg),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text("Cancel"),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text("OK"),
-          ),
-        ],
-      ),
-    );
-    if (ok == true) await action();
   }
 
   @override
@@ -123,7 +96,7 @@ class _DashboardPageState extends State<DashboardPage> {
       appBar: AppBar(
         title: const Text("Mac Lab Dashboard"),
         actions: [
-          IconButton(icon: const Icon(Icons.flash_on), onPressed: fetchStatus),
+          IconButton(icon: const Icon(Icons.refresh), onPressed: fetchStatus),
         ],
       ),
       body: Column(
@@ -133,9 +106,9 @@ class _DashboardPageState extends State<DashboardPage> {
             child: GridView.builder(
               padding: const EdgeInsets.all(10),
               gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                crossAxisCount: 9,
-                crossAxisSpacing: 8,
-                mainAxisSpacing: 8,
+                crossAxisCount: 6,
+                crossAxisSpacing: 4,
+                mainAxisSpacing: 4,
               ),
               itemCount: machines.length,
               itemBuilder: (context, i) {
@@ -147,39 +120,16 @@ class _DashboardPageState extends State<DashboardPage> {
                     color: online ? Colors.green[700] : Colors.red[700],
                     borderRadius: BorderRadius.circular(8),
                   ),
-                  child: Center(child: Text(name)),
+                  child: Center(
+                    child: Text(
+                      name,
+                      style: const TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                  ),
                 );
               },
             ),
           ),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-            children: [
-              ElevatedButton.icon(
-                icon: const Icon(Icons.restart_alt),
-                label: const Text("Reboot ALL"),
-                onPressed: () => confirm(
-                  "Reboot Lab",
-                  "Reboot ALL Macs?",
-                  () => http.post(
-                    Uri.parse("http://admin-pc.local:8000/reboot-all"),
-                  ),
-                ),
-              ),
-              ElevatedButton.icon(
-                icon: const Icon(Icons.power_settings_new),
-                label: const Text("Shutdown ALL"),
-                onPressed: () => confirm(
-                  "Shutdown Lab",
-                  "Shutdown ALL Macs?",
-                  () => http.post(
-                    Uri.parse("http://admin-pc.local:8000/shutdown-all"),
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
         ],
       ),
     );
@@ -187,127 +137,167 @@ class _DashboardPageState extends State<DashboardPage> {
 }
 
 /* =========================
-   SOFTWARE INSTALLER
+   MULTI INSTALLER
    ========================= */
 
-class SoftwarePage extends StatefulWidget {
-  const SoftwarePage({super.key});
+class MultiInstallPage extends StatefulWidget {
+  const MultiInstallPage({super.key});
 
   @override
-  State<SoftwarePage> createState() => _SoftwarePageState();
+  State<MultiInstallPage> createState() => _MultiInstallPageState();
 }
 
-class _SoftwarePageState extends State<SoftwarePage> {
+class _MultiInstallPageState extends State<MultiInstallPage> {
   final List<String> machines = List.generate(
     33,
     (i) => "mac-${(i + 1).toString().padLeft(3, '0')}",
   );
 
-  String selectedMac = "mac-023";
+  final Set<String> selected = {};
+  final Set<String> running = {};
+  final TextEditingController pkgController = TextEditingController();
   String type = "cask";
-  final TextEditingController appController = TextEditingController();
-  bool loading = false;
-  String output = "";
+  String terminal = "";
+  final Map<String, StreamSubscription> streams = {};
 
-  Future<void> install() async {
-    setState(() {
-      loading = true;
-      output = "";
-    });
+  void append(String text) {
+    setState(() => terminal += text);
+  }
 
-    final id = selectedMac.split("-")[1];
-    final uri = Uri.parse(
-      "http://admin-pc.local:8000/brew/install/$id/stream?type=$type&name=${appController.text.trim()}",
-    );
+  Future<void> startInstall() async {
+    if (selected.isEmpty || pkgController.text.trim().isEmpty) return;
 
-    final request = http.Request("GET", uri);
-    final response = await request.send();
+    setState(() => terminal = "");
 
-    response.stream
-        .transform(utf8.decoder)
-        .listen(
-          (chunk) {
-            setState(() {
-              output += chunk;
-            });
-          },
-          onDone: () {
-            setState(() => loading = false);
-          },
-          onError: (e) {
-            setState(() {
-              output += "\nERROR: $e\n";
-              loading = false;
-            });
-          },
-        );
+    for (final mac in selected) {
+      final id = mac.split("-")[1];
+      final uri = Uri.parse(
+        "http://admin-pc.local:8000/brew/install/$id/stream"
+        "?type=$type&name=${pkgController.text.trim()}",
+      );
+
+      running.add(mac);
+      setState(() {});
+
+      final req = http.Request("GET", uri);
+      final res = await req.send();
+
+      final sub = res.stream
+          .transform(utf8.decoder)
+          .listen(
+            (line) => append(line),
+            onDone: () {
+              append("\n[$mac] Stream closed\n");
+              running.remove(mac);
+              setState(() {});
+            },
+            onError: (e) {
+              append("\n[$mac] ERROR: $e\n");
+              running.remove(mac);
+              setState(() {});
+            },
+          );
+
+      streams[mac] = sub;
+    }
+  }
+
+  Future<void> stopAll() async {
+    for (final mac in running.toList()) {
+      final id = mac.split("-")[1];
+      await http.post(Uri.parse("http://admin-pc.local:8000/brew/stop/$id"));
+      streams[mac]?.cancel();
+    }
+
+    running.clear();
+    setState(() {});
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text("Install Software")),
+      appBar: AppBar(title: const Text("Multi Software Install")),
       body: Padding(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(12),
         child: Column(
           children: [
-            DropdownButton<String>(
-              value: selectedMac,
-              isExpanded: true,
-              items: machines
-                  .map((m) => DropdownMenuItem(value: m, child: Text(m)))
-                  .toList(),
-              onChanged: (v) => setState(() => selectedMac = v!),
+            Wrap(
+              spacing: 6,
+              runSpacing: 6,
+              children: machines.map((m) {
+                final active = selected.contains(m);
+                return FilterChip(
+                  label: Text(m),
+                  selected: active,
+                  onSelected: (v) {
+                    setState(() {
+                      v ? selected.add(m) : selected.remove(m);
+                    });
+                  },
+                  selectedColor: Colors.blueAccent,
+                );
+              }).toList(),
             ),
-            const SizedBox(height: 10),
+            const SizedBox(height: 12),
+
             TextField(
-              controller: appController,
+              controller: pkgController,
               decoration: const InputDecoration(
-                labelText: "Package Name",
-                hintText: "firefox, iterm2, visual-studio-code",
+                labelText: "Package name",
+                hintText: "iterm2, firefox, htop, python",
                 border: OutlineInputBorder(),
               ),
             ),
-            const SizedBox(height: 10),
-            DropdownButton<String>(
-              value: type,
-              items: const [
-                DropdownMenuItem(value: "cask", child: Text("Cask (GUI)")),
-                DropdownMenuItem(
-                  value: "formula",
-                  child: Text("Formula (CLI)"),
+            const SizedBox(height: 8),
+
+            Row(
+              children: [
+                const Text("Type: "),
+                const SizedBox(width: 10),
+                DropdownButton<String>(
+                  value: type,
+                  items: const [
+                    DropdownMenuItem(value: "cask", child: Text("Cask (GUI)")),
+                    DropdownMenuItem(value: "formula", child: Text("Formula")),
+                  ],
+                  onChanged: (v) => setState(() => type = v!),
                 ),
               ],
-              onChanged: (v) => setState(() => type = v!),
-            ),
-            const SizedBox(height: 10),
-            ElevatedButton.icon(
-              icon: const Icon(Icons.cloud_download),
-              label: const Text("Install"),
-              onPressed: loading ? null : install,
-            ),
-            ElevatedButton.icon(
-              icon: const Icon(Icons.stop),
-              label: const Text("Stop"),
-              style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
-              onPressed: () async {
-                final id = selectedMac.split("-")[1];
-                await http.post(
-                  Uri.parse("http://admin-pc.local:8000/brew/stop/$id"),
-                );
-              },
             ),
 
-            if (loading) const LinearProgressIndicator(),
+            const SizedBox(height: 10),
+
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                ElevatedButton.icon(
+                  icon: const Icon(Icons.cloud_download),
+                  label: const Text("Install Selected"),
+                  onPressed: running.isNotEmpty ? null : startInstall,
+                ),
+                const SizedBox(width: 16),
+                ElevatedButton.icon(
+                  icon: const Icon(Icons.stop),
+                  label: const Text("Stop All"),
+                  style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+                  onPressed: running.isEmpty ? null : stopAll,
+                ),
+              ],
+            ),
+
+            const SizedBox(height: 10),
+            if (running.isNotEmpty) const LinearProgressIndicator(),
+
             const SizedBox(height: 10),
             Expanded(
               child: Container(
+                width: double.infinity,
                 color: Colors.black,
                 padding: const EdgeInsets.all(8),
                 child: SingleChildScrollView(
                   reverse: true,
                   child: SelectableText(
-                    output,
+                    terminal,
                     style: const TextStyle(
                       fontFamily: "monospace",
                       fontSize: 12,
