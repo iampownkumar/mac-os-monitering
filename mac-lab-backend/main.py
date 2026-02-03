@@ -3,6 +3,7 @@ import subprocess, re, time, os
 from pydantic import BaseModel
 from fastapi.responses import StreamingResponse
 import subprocess
+import os
 
 
 app = FastAPI()
@@ -115,8 +116,15 @@ def brew_install_stream(mac_id: str, type: str, name: str):
         yield f"[{host}] Starting install: {name} ({type})\n"
 
         try:
-            for line in process.stdout:
-                yield line
+            if process.stdout is not None:
+                for line in process.stdout:
+                    yield line
+            else:
+                # No stdout available; wait for process to finish and report
+                rc = process.wait()
+                RUNNING.pop(host, None)
+                yield f"\n[{host}] ❌ No stdout available (rc={rc})\n"
+                return
         except GeneratorExit:
             process.kill()
             yield f"\n[{host}] ⛔ Manually stopped\n"

@@ -17,8 +17,13 @@ class _DashboardPageState extends State<DashboardPage> {
   );
 
   final Set<String> selected = {};
+
   Map<String, bool> status = {};
   bool loading = false;
+
+  // ✅ STATUS COUNTERS
+  int onlineCount = 0;
+  int offlineCount = 0;
 
   int countdown = 20;
   Timer? timer;
@@ -35,6 +40,7 @@ class _DashboardPageState extends State<DashboardPage> {
 
     timer = Timer.periodic(const Duration(seconds: 1), (t) {
       setState(() => countdown--);
+
       if (countdown == 0) {
         t.cancel();
         fetchStatus();
@@ -44,14 +50,26 @@ class _DashboardPageState extends State<DashboardPage> {
     fetchStatus();
   }
 
+  // ========================
+  // FETCH STATUS
+  // ========================
   Future<void> fetchStatus() async {
     setState(() => loading = true);
+
     try {
       status = await BrewService.fetchStatus();
+
+      // ✅ COUNT ONLINE / OFFLINE
+      onlineCount = status.values.where((v) => v).length;
+      offlineCount = status.values.where((v) => !v).length;
     } catch (_) {}
+
     setState(() => loading = false);
   }
 
+  // ========================
+  // CONFIRM DIALOG
+  // ========================
   Future<void> confirmAndRun(
     String title,
     String msg,
@@ -74,9 +92,13 @@ class _DashboardPageState extends State<DashboardPage> {
         ],
       ),
     );
+
     if (ok == true) await action();
   }
 
+  // ========================
+  // REBOOT
+  // ========================
   Future<void> rebootSelected() async {
     await confirmAndRun(
       "Reboot Selected",
@@ -85,12 +107,16 @@ class _DashboardPageState extends State<DashboardPage> {
         for (final mac in selected) {
           await http.post(Uri.parse("http://admin-pc.local:8000/reboot/$mac"));
         }
+
         selected.clear();
         fetchStatus();
       },
     );
   }
 
+  // ========================
+  // SHUTDOWN
+  // ========================
   Future<void> shutdownSelected() async {
     await confirmAndRun(
       "Shutdown Selected",
@@ -101,6 +127,7 @@ class _DashboardPageState extends State<DashboardPage> {
             Uri.parse("http://admin-pc.local:8000/shutdown/$mac"),
           );
         }
+
         selected.clear();
         fetchStatus();
       },
@@ -113,6 +140,38 @@ class _DashboardPageState extends State<DashboardPage> {
     super.dispose();
   }
 
+  // ========================
+  // STATUS BOX UI
+  // ========================
+  Widget _statusBox(String label, int count, Color color) {
+    return Container(
+      width: 100,
+      padding: const EdgeInsets.symmetric(vertical: 10),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.15),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: color, width: 1.5),
+      ),
+      child: Column(
+        children: [
+          Text(
+            count.toString(),
+            style: TextStyle(
+              fontSize: 22,
+              fontWeight: FontWeight.bold,
+              color: color,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(label, style: TextStyle(fontSize: 12, color: color)),
+        ],
+      ),
+    );
+  }
+
+  // ========================
+  // UI
+  // ========================
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -147,6 +206,24 @@ class _DashboardPageState extends State<DashboardPage> {
         children: [
           if (loading) const LinearProgressIndicator(),
 
+          // ========================
+          // STATUS SUMMARY BAR
+          // ========================
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              children: [
+                _statusBox("ONLINE", onlineCount, Colors.green),
+                _statusBox("OFFLINE", offlineCount, Colors.red),
+                _statusBox("TOTAL", machines.length, Colors.blue),
+              ],
+            ),
+          ),
+
+          // ========================
+          // GRID
+          // ========================
           Expanded(
             child: GridView.builder(
               padding: const EdgeInsets.all(12),
@@ -201,7 +278,9 @@ class _DashboardPageState extends State<DashboardPage> {
             ),
           ),
 
-          // GLOBAL ALL CONTROLS (locked when selection active)
+          // ========================
+          // GLOBAL CONTROLS
+          // ========================
           Padding(
             padding: const EdgeInsets.symmetric(vertical: 6),
             child: Row(
@@ -247,7 +326,9 @@ class _DashboardPageState extends State<DashboardPage> {
             ),
           ),
 
+          // ========================
           // SELECTED CONTROLS
+          // ========================
           if (selected.isNotEmpty)
             Padding(
               padding: const EdgeInsets.only(bottom: 12),
